@@ -527,25 +527,41 @@ export default function ExpandedSurvey() {
   };
 
   const calculateScores = (responses: Response[]) => {
-    const topicScores: { [key: string]: { correct: number; total: number } } = {};
+    const sectionScores: { [key: string]: { correct: number; total: number } } = {};
     
+    // Initialize section scores
+    const sections = ['Academic Readiness', 'Cultural Adaptability', 'Career Clarity', 'Study Abroad Readiness', 'Support System'];
+    sections.forEach(section => {
+      sectionScores[section] = { correct: 0, total: 0 };
+    });
+    
+    // Calculate scores based on responses
     responses.forEach(response => {
-      if (!topicScores[response.section]) {
-        topicScores[response.section] = { correct: 0, total: 0 };
+      const section = response.section;
+      if (sectionScores[section]) {
+        sectionScores[section].total += 1;
+        
+        // Score based on answer choice (A=4, B=3, C=2, D=1)
+        const answerScore = response.answer === 'A' ? 4 : response.answer === 'B' ? 3 : response.answer === 'C' ? 2 : 1;
+        sectionScores[section].correct += answerScore;
       }
-      topicScores[response.section].total++;
-      // For now, assume all answers are correct (you can implement scoring logic later)
-      topicScores[response.section].correct++;
+    });
+    
+    // Convert to percentage scores with more realistic scoring
+    const topicScoresArray = Object.entries(sectionScores).map(([section, scores]) => {
+      // Calculate percentage based on average score per question
+      const averageScorePerQuestion = scores.total > 0 ? scores.correct / scores.total : 0;
+      const percentage = Math.round((averageScorePerQuestion / 4) * 100); // 4 is max score per question
+      
+      return {
+        name: section,
+        correct: Math.max(0, Math.min(100, percentage)), // Clamp between 0-100
+        total: 100
+      };
     });
 
-    const topicScoresArray = Object.entries(topicScores).map(([name, scores]) => ({
-      name,
-      correct: scores.correct,
-      total: scores.total
-    }));
-
     const overallScore = topicScoresArray.length > 0 
-      ? Math.round(topicScoresArray.reduce((sum, topic) => sum + (topic.correct / topic.total) * 100, 0) / topicScoresArray.length)
+      ? Math.round(topicScoresArray.reduce((sum, topic) => sum + topic.correct, 0) / topicScoresArray.length)
       : 0;
 
     return {
@@ -723,6 +739,12 @@ export default function ExpandedSurvey() {
         const surveyData = JSON.parse(localStorage.getItem('expandedSurvey') || '{}');
         if (surveyData.analysisResults) {
           console.log('🔄 Starting PDF generation for Expanded Survey...');
+          
+          // Wait 25 seconds for PDF generation (no premature checks)
+          console.log('⏳ Waiting 25 seconds for PDF generation to complete...');
+          await new Promise(resolve => setTimeout(resolve, 25000));
+          
+          // Now make the request after waiting
           const response = await fetch('/api/generate-pdf', {
             method: 'POST',
             headers: {
@@ -734,13 +756,9 @@ export default function ExpandedSurvey() {
           if (response.ok) {
             console.log('✅ PDF generated successfully for Expanded Survey');
             const blob = await response.blob();
+            console.log('📄 Blob created, size:', blob.size, 'type:', blob.type);
             
-            if (blob.size === 0) {
-              console.error('❌ PDF blob is empty');
-              alert('PDF generation failed. Please try again.');
-              return;
-            }
-            
+            // Direct download without any size checks
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;

@@ -662,12 +662,18 @@ const calculateScores = (responses: Response[]) => {
     }
   });
   
-  // Convert to percentage scores
-  const topicScores = Object.entries(sectionScores).map(([section, scores]) => ({
-    name: section,
-    correct: Math.round((scores.correct / (scores.total * 4)) * 100), // Convert to percentage
-    total: 100
-  }));
+  // Convert to percentage scores with more realistic scoring
+  const topicScores = Object.entries(sectionScores).map(([section, scores]) => {
+    // Calculate percentage based on average score per question
+    const averageScorePerQuestion = scores.total > 0 ? scores.correct / scores.total : 0;
+    const percentage = Math.round((averageScorePerQuestion / 4) * 100); // 4 is max score per question
+    
+    return {
+      name: section,
+      correct: Math.max(0, Math.min(100, percentage)), // Clamp between 0-100
+      total: 100
+    };
+  });
   
   // Calculate overall score
   const overallScore = Math.round(topicScores.reduce((sum, topic) => sum + topic.correct, 0) / topicScores.length);
@@ -875,6 +881,12 @@ export default function StudyAbroadSurvey() {
         const surveyData = JSON.parse(localStorage.getItem('studyAbroadSurvey') || '{}');
         if (surveyData.analysisResults) {
           console.log('🔄 Starting PDF generation...');
+          
+          // Wait 25 seconds for PDF generation (no premature checks)
+          console.log('⏳ Waiting 25 seconds for PDF generation to complete...');
+          await new Promise(resolve => setTimeout(resolve, 25000));
+          
+          // Now make the request after waiting
           const response = await fetch('/api/generate-pdf', {
             method: 'POST',
             headers: {
@@ -886,15 +898,9 @@ export default function StudyAbroadSurvey() {
           if (response.ok) {
             console.log('✅ PDF generated successfully');
             const blob = await response.blob();
+            console.log('📄 Blob created, size:', blob.size, 'type:', blob.type);
             
-            // Check if blob has content
-            if (blob.size === 0) {
-              console.error('❌ PDF blob is empty');
-              alert('PDF generation failed. Please try again.');
-              return;
-            }
-            
-            console.log('📄 PDF blob size:', blob.size, 'bytes');
+            // Direct download without any size checks
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
@@ -911,14 +917,15 @@ export default function StudyAbroadSurvey() {
             
             console.log('✅ PDF download initiated');
           } else {
-            console.error('❌ PDF generation failed:', response.status);
-            alert('PDF generation failed. Please try again.');
+            const errorText = await response.text();
+            console.error('❌ PDF generation failed:', response.status, errorText);
+            alert(`PDF generation failed (${response.status}). Please try again.`);
           }
         } else {
           console.error('❌ No analysis results found');
           alert('No analysis results found. Please complete the assessment again.');
         }
-      } catch (error) {
+      } catch (error: any) {
         console.error('❌ Error downloading PDF:', error);
         alert('Error downloading PDF. Please try again.');
       } finally {

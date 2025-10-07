@@ -7,14 +7,14 @@ export async function POST(request: NextRequest) {
     console.log('📄 PDF Generation - Received data:', JSON.stringify(results, null, 2))
     
     // Validate required fields
-    if (!results.studentName) {
-      console.error('❌ Missing studentName in PDF data')
+    if (!results['Student Name'] && !results.studentName) {
+      console.error('❌ Missing Student Name in PDF data')
       return NextResponse.json({ error: 'Missing student name' }, { status: 400 })
     }
     
     // Simple browser configuration
     const browser = await puppeteer.launch({
-      headless: 'new',
+      headless: true,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
     await new Promise(resolve => setTimeout(resolve, 3000))
     
     // Generate PDF with error handling
-    let pdfBuffer: Buffer;
+    let pdfBuffer: Buffer | Uint8Array;
     try {
       pdfBuffer = await page.pdf({
         format: 'A4',
@@ -64,24 +64,23 @@ export async function POST(request: NextRequest) {
       // Return a simple text response as fallback
       return new NextResponse(`
         <html>
-          <head><title>Study Abroad Report - ${results.studentName}</title></head>
+          <head><title>Study Abroad Report - ${results['Student Name'] || results.studentName}</title></head>
           <body style="font-family: Arial, sans-serif; padding: 20px;">
             <h1>Study Abroad Readiness Report</h1>
-            <h2>Student: ${results.studentName}</h2>
-            <p><strong>Assessment Type:</strong> ${results.testType || 'Study Abroad Readiness'}</p>
-            <p><strong>Overall Score:</strong> ${results.score || 'N/A'}/100</p>
-            <p><strong>Readiness Band:</strong> ${results.analysis?.readinessBand || 'Needs Assessment'}</p>
+            <h2>Student: ${results['Student Name'] || results.studentName}</h2>
+            <p><strong>Overall Readiness Index:</strong> ${results['Overall Readiness Index'] || 'N/A'}</p>
+            <p><strong>Readiness Level:</strong> ${results['Readiness Level'] || 'Needs Assessment'}</p>
+            <h3>Strengths:</h3>
+            <p>${results.Strengths || 'No strengths identified'}</p>
             <h3>Recommendations:</h3>
-            <ul>
-              ${results.analysis?.specificRecommendations?.map(rec => `<li>${rec}</li>`).join('') || '<li>Complete assessment for personalized recommendations</li>'}
-            </ul>
+            <p>${results.Recommendations || 'No recommendations provided'}</p>
             <p><em>Note: This is a simplified report. For detailed analysis, please retry PDF generation.</em></p>
           </body>
         </html>
       `, {
         headers: {
           'Content-Type': 'text/html',
-          'Content-Disposition': `attachment; filename="study-abroad-report-${results.studentName.replace(/\s+/g, '-').toLowerCase()}.html"`
+          'Content-Disposition': `attachment; filename="study-abroad-report-${(results['Student Name'] || results.studentName).replace(/\s+/g, '-').toLowerCase()}.html"`
         }
       });
     }
@@ -97,15 +96,17 @@ export async function POST(request: NextRequest) {
     
     await browser.close()
     
-    // Return PDF as response
-    return new NextResponse(pdfBuffer as any, {
+    console.log('📄 Returning PDF response with size:', pdfBuffer.length)
+    
+    // Return PDF as response - use Response constructor for binary data
+    return new Response(pdfBuffer, {
+      status: 200,
       headers: {
         'Content-Type': 'application/pdf',
         'Content-Length': pdfBuffer.length.toString(),
-        'Content-Disposition': `attachment; filename="psychometric-report-${results.studentName.replace(/\s+/g, '-').toLowerCase()}.pdf"`
+        'Content-Disposition': `attachment; filename="psychometric-report-${(results['Student Name'] || results.studentName).replace(/\s+/g, '-').toLowerCase()}.pdf"`
       }
     })
-    
   } catch (error) {
     console.error('Error generating PDF:', error)
     return NextResponse.json({ error: 'Failed to generate PDF' }, { status: 500 })
@@ -117,7 +118,79 @@ function generateHTMLContent(results: any): string {
     year: 'numeric',
     month: 'long',
     day: 'numeric'
-  })
+  });
+
+  // Get data from new LLM format
+  const studentName = results['Student Name'] || results.studentName || 'Student';
+  const scores = results.Scores || {};
+  const overallIndex = results['Overall Readiness Index'] || 0;
+  const readinessLevel = results['Readiness Level'] || 'Needs Assessment';
+  const strengths = results.Strengths || 'No strengths identified';
+  const gaps = results.Gaps || 'No gaps identified';
+  const recommendations = results.Recommendations || 'No recommendations provided';
+  const countryFit = results['Country Fit (Top 3)'] || [];
+
+  // Helper to generate compact score card
+  const generateScoreCard = (label: string, score: number, weight: string) => {
+    const percentage = Math.round(score);
+    const barClass = percentage >= 80 ? 'excellent' : percentage >= 60 ? 'good' : percentage >= 40 ? 'average' : 'weak';
+    
+    return `
+      <div class="score-card">
+        <h4>${label}</h4>
+        <div class="score-value">${percentage}%</div>
+        <div class="score-bar">
+          <div class="score-fill ${barClass}" style="width: ${percentage}%"></div>
+        </div>
+        <div style="font-size: 0.7em; color: #666; margin-top: 4px;">Weight: ${weight}</div>
+      </div>
+    `;
+  };
+
+  // Helper to generate compact country card
+  const generateCountryCard = (country: string, index: number) => {
+    const countryInfo = {
+      'Singapore': { flag: '🇸🇬' },
+      'Ireland': { flag: '🇮🇪' },
+      'Netherlands': { flag: '🇳🇱' },
+      'Canada': { flag: '🇨🇦' },
+      'Australia': { flag: '🇦🇺' },
+      'United Kingdom': { flag: '🇬🇧' },
+      'Germany': { flag: '🇩🇪' },
+      'United States': { flag: '🇺🇸' },
+      'India': { flag: '🇮🇳' },
+      'United Arab Emirates': { flag: '🇦🇪' }
+    };
+    
+    const info = countryInfo[country] || { flag: '🌍' };
+    
+    return `
+      <div class="country-card">
+        <div class="country-rank">#${index + 1}</div>
+        <div class="country-flag">${info.flag}</div>
+        <div class="country-name">${country}</div>
+        <div class="country-score">${Math.round(100 - (index * 15))}% Match</div>
+      </div>
+    `;
+  };
+
+  // Helper to generate recommendation sections
+  const generateRecommendationSection = (title: string, items: string[], icon: string) => `
+    <div class="recommendation-section">
+      <div class="recommendation-header">
+        <span class="recommendation-icon">${icon}</span>
+        <h4>${title}</h4>
+      </div>
+      <div class="recommendation-content">
+        ${items.map((item, index) => `
+          <div class="recommendation-item">
+            <span class="item-number">${index + 1}</span>
+            <span class="item-text">${item}</span>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+  `;
 
   return `
     <!DOCTYPE html>
@@ -125,8 +198,11 @@ function generateHTMLContent(results: any): string {
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Psychometric Assessment Report</title>
+        <title>D-Vivid Consultant - Study Abroad Assessment Report</title>
         <style>
+            @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700;800&display=swap');
+            @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap');
+
             * {
                 margin: 0;
                 padding: 0;
@@ -134,580 +210,391 @@ function generateHTMLContent(results: any): string {
             }
             
             body {
-                font-family: 'Arial', sans-serif;
-                line-height: 1.6;
+                font-family: 'Poppins', sans-serif;
+                line-height: 1.4;
                 color: #333;
-                background: #fff;
-            }
-            
-            .chart-container {
-                background: #f8f9fa;
-                border-radius: 8px;
-                padding: 20px;
-                margin: 20px 0;
-                border-left: 4px solid #003B8C;
-            }
-            
-            .chart-title {
-                font-size: 18px;
-                font-weight: bold;
-                color: #003B8C;
-                margin-bottom: 15px;
-            }
-            
-            .bar-chart {
-                display: flex;
-                align-items: center;
-                margin-bottom: 15px;
-            }
-            
-            .bar-label {
-                width: 150px;
-                font-weight: 500;
-                color: #555;
-            }
-            
-            .bar-container {
-                flex: 1;
-                height: 25px;
-                background: #e9ecef;
-                border-radius: 12px;
-                margin: 0 10px;
-                overflow: hidden;
-                position: relative;
-            }
-            
-            .bar-fill {
-                height: 100%;
-                border-radius: 12px;
-                transition: width 0.3s ease;
-                position: relative;
-            }
-            
-            .bar-fill.excellent { background: linear-gradient(90deg, #22C55E, #16A34A); }
-            .bar-fill.good { background: linear-gradient(90deg, #3B82F6, #2563EB); }
-            .bar-fill.average { background: linear-gradient(90deg, #F59E0B, #D97706); }
-            .bar-fill.weak { background: linear-gradient(90deg, #EF4444, #DC2626); }
-            
-            .bar-value {
-                position: absolute;
-                right: 10px;
-                top: 50%;
-                transform: translateY(-50%);
-                color: white;
-                font-weight: bold;
+                background: #ffffff;
+                margin: 0;
+                padding: 0;
                 font-size: 12px;
             }
             
-            .radar-chart {
-                display: grid;
-                grid-template-columns: repeat(2, 1fr);
-                gap: 20px;
-                margin: 20px 0;
-            }
-            
-            .radar-item {
-                background: white;
-                padding: 15px;
-                border-radius: 8px;
-                border: 2px solid #e9ecef;
-                text-align: center;
-            }
-            
-            .radar-score {
-                font-size: 24px;
-                font-weight: bold;
-                color: #003B8C;
-                margin-bottom: 5px;
-            }
-            
-            .radar-label {
-                font-size: 14px;
-                color: #666;
-            }
-            
-            .improvement-areas {
-                background: linear-gradient(135deg, #FFF3CD, #FEF3C7);
-                border: 2px solid #F59E0B;
-                border-radius: 8px;
-                padding: 20px;
-                margin: 20px 0;
-            }
-            
-            .strength-areas {
-                background: linear-gradient(135deg, #D1FAE5, #A7F3D0);
-                border: 2px solid #22C55E;
-                border-radius: 8px;
-                padding: 20px;
-                margin: 20px 0;
+            .page {
+                width: 210mm;
+                min-height: 297mm;
+                margin: 0 auto;
+                background: #ffffff;
+                position: relative;
+                padding: 0;
             }
             
             .header {
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                background: linear-gradient(135deg, #003B8C 0%, #5BE49B 100%);
                 color: white;
-                padding: 30px;
-                text-align: center;
-                margin-bottom: 30px;
-            }
-            
-            .header h1 {
-                font-size: 2.5em;
-                margin-bottom: 10px;
-            }
-            
-            .header p {
-                font-size: 1.2em;
-                opacity: 0.9;
-            }
-            
-            .container {
-                max-width: 800px;
-                margin: 0 auto;
-                padding: 0 20px;
-            }
-            
-            .section {
-                margin-bottom: 30px;
-                page-break-inside: avoid;
-            }
-            
-            .section-header {
-                background: #f8f9fa;
                 padding: 15px 20px;
-                border-left: 4px solid #667eea;
-                font-size: 1.3em;
-                font-weight: bold;
-                margin-bottom: 20px;
+                text-align: center;
+                position: relative;
+                overflow: hidden;
+                height: 80px;
             }
             
-            .section-content {
-                padding: 0 20px;
+            .header-content {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                height: 100%;
+            }
+            
+            .logo-section {
+                display: flex;
+                align-items: center;
+                gap: 15px;
+            }
+            
+            .logo {
+                width: 50px;
+                height: 50px;
+                background: white;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            }
+            
+            .logo img {
+                max-width: 80%;
+                max-height: 80%;
+            }
+            
+            .company-info h1 {
+                font-family: 'Montserrat', sans-serif;
+                font-size: 1.8em;
+                font-weight: 800;
+                margin: 0;
+                text-shadow: 1px 1px 2px rgba(0,0,0,0.3);
+            }
+            
+            .company-info p {
+                font-size: 0.9em;
+                opacity: 0.95;
+                margin: 0;
+                font-weight: 500;
+            }
+            
+            .report-title {
+                text-align: center;
+                flex: 1;
+            }
+            
+            .report-title h2 {
+                font-size: 1.4em;
+                font-weight: 700;
+                margin: 0;
+            }
+            
+            .report-title p {
+                font-size: 0.8em;
+                opacity: 0.9;
+                margin: 2px 0 0 0;
+            }
+            
+            .footer {
+                position: absolute;
+                bottom: 0;
+                left: 0;
+                right: 0;
+                background: linear-gradient(135deg, #003B8C 0%, #5BE49B 100%);
+                color: white;
+                padding: 8px 20px;
+                text-align: center;
+                font-size: 0.8em;
+                height: 30px;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+            }
+            
+            .footer-logo {
+                width: 20px;
+                height: 20px;
+                background: white;
+                border-radius: 50%;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+                margin-right: 8px;
+            }
+            
+            .footer-logo img {
+                max-width: 70%;
+                max-height: 70%;
+            }
+            
+            .content {
+                padding: 20px;
+                min-height: calc(297mm - 110px);
+                display: flex;
+                flex-direction: column;
+                gap: 15px;
             }
             
             .student-info {
                 display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-                gap: 20px;
-                margin-bottom: 30px;
+                grid-template-columns: 1fr 1fr;
+                gap: 15px;
+                margin-bottom: 15px;
             }
             
             .info-item {
-                background: #f8f9fa;
-                padding: 15px;
+                background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+                padding: 12px;
                 border-radius: 8px;
-                border-left: 4px solid #667eea;
+                border-left: 4px solid #5BE49B;
             }
             
             .info-label {
-                font-weight: bold;
+                font-weight: 700;
                 color: #666;
-                margin-bottom: 5px;
+                margin-bottom: 4px;
+                font-size: 0.8em;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
             }
             
             .info-value {
                 font-size: 1.1em;
-                color: #333;
+                font-weight: 800;
+                color: #003B8C;
             }
             
-            .score-summary {
+            .overall-score {
+                text-align: center;
+                margin: 15px 0;
+                padding: 20px;
+                background: linear-gradient(45deg, #003B8C, #5BE49B);
+                color: white;
+                border-radius: 10px;
+            }
+            
+            .overall-score h3 {
+                font-size: 2.5em;
+                margin-bottom: 8px;
+                font-weight: 800;
+            }
+            
+            .overall-score p {
+                font-size: 1.2em;
+                opacity: 0.95;
+                font-weight: 600;
+            }
+            
+            .scores-grid {
                 display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-                gap: 20px;
-                margin-bottom: 30px;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 12px;
+                margin: 15px 0;
             }
             
             .score-card {
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                color: white;
-                padding: 20px;
+                background: #ffffff;
+                padding: 15px;
                 border-radius: 10px;
+                border: 2px solid #e0e0e0;
                 text-align: center;
             }
             
-            .score-card h3 {
+            .score-card h4 {
+                font-size: 1em;
+                color: #003B8C;
+                font-weight: 700;
+                margin-bottom: 8px;
+            }
+            
+            .score-value {
                 font-size: 2em;
+                font-weight: 800;
+                color: #003B8C;
                 margin-bottom: 5px;
             }
             
-            .score-card p {
-                opacity: 0.9;
+            .score-bar {
+                height: 8px;
+                background: #e9ecef;
+                border-radius: 4px;
+                overflow: hidden;
+                margin-bottom: 5px;
             }
             
-            .topics-grid {
-                display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-                gap: 15px;
-                margin-bottom: 30px;
+            .score-fill {
+                height: 100%;
+                border-radius: 4px;
+                transition: width 0.3s ease;
             }
             
-            .topic-card {
+            .score-fill.excellent { background: linear-gradient(90deg, #22C55E, #16A34A); }
+            .score-fill.good { background: linear-gradient(90deg, #3B82F6, #2563EB); }
+            .score-fill.average { background: linear-gradient(90deg, #F59E0B, #D97706); }
+            .score-fill.weak { background: linear-gradient(90deg, #EF4444, #DC2626); }
+            
+            .analysis-section {
                 background: #f8f9fa;
                 padding: 15px;
                 border-radius: 8px;
-                border-left: 4px solid #28a745;
+                border-left: 4px solid #003B8C;
+                margin: 10px 0;
             }
             
-            .topic-name {
-                font-weight: bold;
-                margin-bottom: 5px;
+            .analysis-section h4 {
+                font-size: 1.1em;
+                color: #003B8C;
+                margin-bottom: 8px;
+                font-weight: 700;
             }
             
-            .topic-score {
-                color: #666;
+            .analysis-section p {
+                line-height: 1.5;
+                color: #555;
                 font-size: 0.9em;
             }
             
-            .recommendations {
+            .country-fit {
                 display: grid;
-                grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-                gap: 20px;
+                grid-template-columns: repeat(3, 1fr);
+                gap: 12px;
+                margin: 15px 0;
             }
             
-            .recommendation-category {
-                background: #f8f9fa;
-                padding: 20px;
-                border-radius: 8px;
-                border-left: 4px solid #17a2b8;
-            }
-            
-            .recommendation-category h4 {
-                color: #333;
-                margin-bottom: 15px;
-                font-size: 1.1em;
-            }
-            
-            .recommendation-list {
-                list-style: none;
-                padding: 0;
-            }
-            
-            .recommendation-list li {
-                background: white;
-                margin-bottom: 8px;
-                padding: 10px 15px;
-                border-radius: 5px;
-                border-left: 3px solid #17a2b8;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            }
-            
-            .analysis-summary {
-                background: #f8f9fa;
-                padding: 20px;
-                border-radius: 8px;
-                margin-bottom: 20px;
-            }
-            
-            .readiness-band {
-                text-align: center;
-                margin-bottom: 20px;
+            .country-card {
+                background: linear-gradient(135deg, #f8f9fa, #e9ecef);
                 padding: 15px;
-                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                border-radius: 10px;
+                text-align: center;
+                border: 2px solid #e0e0e0;
+            }
+            
+            .country-rank {
+                background: linear-gradient(45deg, #003B8C, #5BE49B);
                 color: white;
-                border-radius: 8px;
+                width: 30px;
+                height: 30px;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                margin: 0 auto 8px auto;
+                font-weight: 800;
+                font-size: 0.9em;
             }
             
-            .readiness-band h4 {
-                font-size: 1.2em;
-                margin-bottom: 10px;
+            .country-flag {
+                font-size: 1.5em;
+                margin-bottom: 5px;
             }
             
-            .strengths-weaknesses {
-                display: grid;
-                grid-template-columns: 1fr 1fr;
-                gap: 20px;
-                margin-bottom: 20px;
+            .country-name {
+                font-size: 1em;
+                font-weight: 700;
+                color: #003B8C;
+                margin-bottom: 5px;
             }
             
-            .strengths, .weaknesses {
-                background: white;
-                padding: 15px;
-                border-radius: 8px;
-                border-left: 4px solid #667eea;
-            }
-            
-            .weaknesses {
-                border-left-color: #e74c3c;
-            }
-            
-            .specific-recommendations {
-                background: white;
-                padding: 15px;
-                border-radius: 8px;
-                border-left: 4px solid #27ae60;
-            }
-            
-            .footer {
-                margin-top: 50px;
-                padding: 20px;
-                background: #f8f9fa;
-                text-align: center;
-                color: #666;
-                border-top: 2px solid #667eea;
-            }
-            
-            .footer .date {
-                font-weight: bold;
-                color: #333;
-                margin-top: 10px;
+            .country-score {
+                background: linear-gradient(45deg, #5BE49B, #4ade80);
+                color: white;
+                padding: 4px 8px;
+                border-radius: 6px;
+                font-weight: 700;
+                font-size: 0.8em;
             }
             
             @media print {
-                body { -webkit-print-color-adjust: exact; }
+                body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+                .page { box-shadow: none; border: none; }
+                .header, .footer { background-color: #003B8C !important; }
             }
         </style>
     </head>
     <body>
-        <div class="header">
-            <div style="display: flex; align-items: center; margin-bottom: 20px;">
-                <div style="width: 80px; height: 80px; background: linear-gradient(135deg, #003B8C, #5BE49B); border-radius: 12px; display: flex; align-items: center; justify-content: center; margin-right: 25px; box-shadow: 0 4px 12px rgba(0,59,140,0.3);">
-                    <span style="color: white; font-weight: bold; font-size: 32px;">DV</span>
-                </div>
-                <div>
-                    <h1 style="margin: 0; color: white; font-size: 32px; font-weight: 700;">D-Vivid Consultant</h1>
-                    <p style="margin: 8px 0 0 0; color: rgba(255,255,255,0.9); font-size: 18px; font-weight: 500;">Strategic Counselling Circle</p>
-                    <p style="margin: 5px 0 0 0; color: rgba(255,255,255,0.8); font-size: 14px;">Your Gateway to Global Education</p>
-                </div>
-            </div>
-            <div style="text-align: center; margin-top: 30px;">
-                <h2 style="color: white; margin: 0 0 10px 0; font-size: 28px; font-weight: 600;">Psychometric Assessment Report</h2>
-                <p style="color: rgba(255,255,255,0.9); margin: 0; font-size: 18px;">Comprehensive Study Abroad Readiness Analysis</p>
-                <div style="margin-top: 20px; padding: 15px; background: rgba(255,255,255,0.1); border-radius: 8px; border: 1px solid rgba(255,255,255,0.2);">
-                    <p style="margin: 0; color: white; font-size: 16px; font-weight: 500;">📊 AI-Powered Analysis • 🎯 Personalized Recommendations • 🌍 Global Readiness Assessment</p>
-                </div>
-            </div>
-        </div>
-        
-        <div class="container">
-            <div class="section">
-                <div class="section-header">Student Information</div>
-                <div class="section-content">
-                    <div class="student-info">
-                        <div class="info-item">
-                            <div class="info-label">Student Name</div>
-                            <div class="info-value">${results.studentName}</div>
+        <div class="page">
+            <div class="header">
+                <div class="header-content">
+                    <div class="logo-section">
+                        <div class="logo">
+                            <img src="https://iili.io/Jp021xX.png" alt="D-Vivid Logo"/>
                         </div>
-                        <div class="info-item">
-                            <div class="info-label">Email</div>
-                            <div class="info-value">${results.studentEmail}</div>
+                        <div class="company-info">
+                            <h1>D-Vivid Consultant</h1>
+                            <p>Strategic Counselling Circle</p>
                         </div>
-                        <div class="info-item">
-                            <div class="info-label">Class</div>
-                            <div class="info-value">${results.studentClass}</div>
-                        </div>
-                        <div class="info-item">
-                            <div class="info-label">School</div>
-                            <div class="info-value">${results.studentSchool}</div>
-                        </div>
+                    </div>
+                    <div class="report-title">
+                        <h2>Study Abroad Assessment Report</h2>
+                        <p>Comprehensive Readiness Index (CRI)</p>
                     </div>
                 </div>
             </div>
             
-            <div class="section">
-                <div class="section-header">Assessment Summary</div>
-                <div class="section-content">
-                    <div class="score-summary">
-                        <div class="score-card">
-                            <h3>${results.score}</h3>
-                            <p>Total Score</p>
-                        </div>
-                        <div class="score-card">
-                            <h3>${results.maxScore}</h3>
-                            <p>Maximum Score</p>
-                        </div>
-                        <div class="score-card">
-                            <h3>${Math.round((results.score / results.maxScore) * 100)}%</h3>
-                            <p>Percentage</p>
-                        </div>
-                        <div class="score-card">
-                            <h3>${results.totalTime}</h3>
-                            <p>Minutes Taken</p>
-                        </div>
+            <div class="content">
+                <div class="student-info">
+                    <div class="info-item">
+                        <div class="info-label">Student Name</div>
+                        <div class="info-value">${studentName}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Assessment Date</div>
+                        <div class="info-value">${currentDate}</div>
                     </div>
                 </div>
+                
+                <div class="overall-score">
+                    <h3>${overallIndex}%</h3>
+                    <p>Overall Readiness Index: ${readinessLevel}</p>
+                </div>
+                
+                <div class="scores-grid">
+                    ${scores['Financial Planning'] ? generateScoreCard('Financial Planning', scores['Financial Planning'], '25%') : ''}
+                    ${scores['Academic Readiness'] ? generateScoreCard('Academic Readiness', scores['Academic Readiness'], '20%') : ''}
+                    ${scores['Career Alignment'] ? generateScoreCard('Career Alignment', scores['Career Alignment'], '20%') : ''}
+                    ${scores['Personal & Cultural'] ? generateScoreCard('Personal & Cultural', scores['Personal & Cultural'], '15%') : ''}
+                    ${scores['Practical Readiness'] ? generateScoreCard('Practical Readiness', scores['Practical Readiness'], '10%') : ''}
+                    ${scores['Support System'] ? generateScoreCard('Support System', scores['Support System'], '10%') : ''}
+                </div>
+                
+                <div class="analysis-section">
+                    <h4>💪 Key Strengths</h4>
+                    <p>${strengths}</p>
+                </div>
+                
+                <div class="analysis-section">
+                    <h4>⚠️ Areas for Development</h4>
+                    <p>${gaps}</p>
+                </div>
+                
+                <div class="analysis-section">
+                    <h4>🎯 Strategic Recommendations</h4>
+                    <p>${recommendations}</p>
+                </div>
+                
+                ${countryFit.length > 0 ? `
+                <div class="country-fit">
+                    <h4 style="grid-column: 1/-1; text-align: center; color: #003B8C; margin-bottom: 10px;">🌍 Recommended Study Destinations</h4>
+                    ${countryFit.map((country: string, index: number) => generateCountryCard(country, index)).join('')}
+                </div>
+                ` : ''}
             </div>
             
-            <div class="section">
-                <div class="section-header">📊 Detailed Performance Analysis</div>
-                <div class="section-content">
-                    <div class="chart-container">
-                        <div class="chart-title">Academic Performance Breakdown</div>
-                        ${results.topics && results.topics.length > 0 ? results.topics.map((topic: any) => {
-                            const percentage = Math.round((topic.correct / topic.total) * 100);
-                            const barClass = percentage >= 80 ? 'excellent' : percentage >= 60 ? 'good' : percentage >= 40 ? 'average' : 'weak';
-                            return `
-                                <div class="bar-chart">
-                                    <div class="bar-label">${topic.name}</div>
-                                    <div class="bar-container">
-                                        <div class="bar-fill ${barClass}" style="width: ${percentage}%">
-                                            <div class="bar-value">${percentage}%</div>
-                                        </div>
-                                    </div>
-                                </div>
-                            `;
-                        }).join('') : '<p>No topic data available</p>'}
+            <div class="footer">
+                <div style="display: flex; align-items: center;">
+                    <div class="footer-logo">
+                        <img src="https://iili.io/Jp021xX.png" alt="D-Vivid Logo"/>
                     </div>
-                    
-                    <div class="chart-container">
-                        <div class="chart-title">Skills Assessment Overview</div>
-                        <div class="radar-chart">
-                            ${results.skills && results.skills.length > 0 ? results.skills.map((skill: any) => `
-                                <div class="radar-item">
-                                    <div class="radar-score">${skill.score}%</div>
-                                    <div class="radar-label">${skill.name}</div>
-                                </div>
-                            `).join('') : '<p>No skills data available</p>'}
-                        </div>
-                    </div>
-                    
-                    <div class="chart-container">
-                        <div class="chart-title">Career Interest Alignment</div>
-                        ${results.careerInterests && results.careerInterests.length > 0 ? results.careerInterests.map((interest: any) => {
-                            const percentage = Math.round((interest.score / 10) * 100);
-                            const barClass = percentage >= 80 ? 'excellent' : percentage >= 60 ? 'good' : percentage >= 40 ? 'average' : 'weak';
-                            return `
-                                <div class="bar-chart">
-                                    <div class="bar-label">${interest.name}</div>
-                                    <div class="bar-container">
-                                        <div class="bar-fill ${barClass}" style="width: ${percentage}%">
-                                            <div class="bar-value">${interest.score}/10</div>
-                                        </div>
-                                    </div>
-                                </div>
-                            `;
-                        }).join('') : '<p>No career interests data available</p>'}
-                    </div>
+                    <span>D-Vivid Consultant - Strategic Counselling Circle</span>
                 </div>
-            </div>
-            
-            ${results.analysis ? `
-            <div class="section">
-                <div class="section-header">🤖 AI-Powered Analysis & Insights</div>
-                <div class="section-content">
-                    <div class="analysis-summary">
-                        <div class="readiness-band">
-                            <h4>🎯 Readiness Band: ${results.analysis.readinessBand}</h4>
-                            <p>${results.analysis.overallAssessment}</p>
-                        </div>
-                        
-                        <div class="strength-areas">
-                            <h4>💪 Your Key Strengths</h4>
-                            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-top: 15px;">
-                                ${results.analysis.strengths.map((strength: string, index: number) => `
-                                    <div style="background: white; padding: 12px; border-radius: 6px; border-left: 4px solid #22C55E;">
-                                        <div style="font-weight: 600; color: #16A34A;">${index + 1}. ${strength}</div>
-                                    </div>
-                                `).join('')}
-                            </div>
-                        </div>
-                        
-                        <div class="improvement-areas">
-                            <h4>🎯 Focus Areas for Development</h4>
-                            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-top: 15px;">
-                                ${results.analysis.weaknesses.map((weakness: string, index: number) => `
-                                    <div style="background: white; padding: 12px; border-radius: 6px; border-left: 4px solid #F59E0B;">
-                                        <div style="font-weight: 600; color: #D97706;">${index + 1}. ${weakness}</div>
-                                    </div>
-                                `).join('')}
-                            </div>
-                        </div>
-                        
-                        <div style="background: linear-gradient(135deg, #E0E7FF, #C7D2FE); border: 2px solid #6366F1; border-radius: 8px; padding: 20px; margin: 20px 0;">
-                            <h4 style="color: #4F46E5; margin-bottom: 15px;">🎯 Strategic Action Plan</h4>
-                            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px;">
-                                ${results.analysis.specificRecommendations.map((rec: string, index: number) => `
-                                    <div style="background: white; padding: 15px; border-radius: 6px; border: 1px solid #E5E7EB;">
-                                        <div style="display: flex; align-items: center; margin-bottom: 8px;">
-                                            <div style="width: 24px; height: 24px; background: #6366F1; color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold; margin-right: 10px;">${index + 1}</div>
-                                            <div style="font-weight: 600; color: #374151;">Priority ${index + 1}</div>
-                                        </div>
-                                        <div style="color: #6B7280; font-size: 14px;">${rec}</div>
-                                    </div>
-                                `).join('')}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            ` : ''}
-            
-            <div class="section">
-                <div class="section-header">🎯 Personalized Study Abroad Roadmap</div>
-                <div class="section-content">
-                    <div class="recommendations">
-                        <div class="recommendation-category" style="background: linear-gradient(135deg, #F0F9FF, #E0F2FE); border: 2px solid #0EA5E9; border-radius: 12px; padding: 25px; margin-bottom: 20px;">
-                            <h4 style="color: #0369A1; font-size: 20px; margin-bottom: 15px; display: flex; align-items: center;">
-                                📚 Academic Excellence Track
-                            </h4>
-                            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
-                                ${results.academicRecommendations.map((rec: string, index: number) => `
-                                    <div style="background: white; padding: 12px; border-radius: 8px; border-left: 4px solid #0EA5E9; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                                        <div style="font-weight: 600; color: #0369A1;">${rec}</div>
-                                    </div>
-                                `).join('')}
-                            </div>
-                        </div>
-                        
-                        <div class="recommendation-category" style="background: linear-gradient(135deg, #F0FDF4, #DCFCE7); border: 2px solid #22C55E; border-radius: 12px; padding: 25px; margin-bottom: 20px;">
-                            <h4 style="color: #15803D; font-size: 20px; margin-bottom: 15px; display: flex; align-items: center;">
-                                🎓 Standardized Testing Strategy
-                            </h4>
-                            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
-                                ${results.examRecommendations.map((rec: string, index: number) => `
-                                    <div style="background: white; padding: 12px; border-radius: 8px; border-left: 4px solid #22C55E; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                                        <div style="font-weight: 600; color: #15803D;">${rec}</div>
-                                    </div>
-                                `).join('')}
-                            </div>
-                        </div>
-                        
-                        <div class="recommendation-category" style="background: linear-gradient(135deg, #FEF3C7, #FDE68A); border: 2px solid #F59E0B; border-radius: 12px; padding: 25px; margin-bottom: 20px;">
-                            <h4 style="color: #D97706; font-size: 20px; margin-bottom: 15px; display: flex; align-items: center;">
-                                🚀 Skill Development Program
-                            </h4>
-                            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
-                                ${results.upskillingRecommendations.map((rec: string, index: number) => `
-                                    <div style="background: white; padding: 12px; border-radius: 8px; border-left: 4px solid #F59E0B; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                                        <div style="font-weight: 600; color: #D97706;">${rec}</div>
-                                    </div>
-                                `).join('')}
-                            </div>
-                        </div>
-                        
-                        <div class="recommendation-category" style="background: linear-gradient(135deg, #F3E8FF, #E9D5FF); border: 2px solid #A855F7; border-radius: 12px; padding: 25px;">
-                            <h4 style="color: #7C3AED; font-size: 20px; margin-bottom: 15px; display: flex; align-items: center;">
-                                🌟 Leadership & Experience Building
-                            </h4>
-                            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px;">
-                                ${results.extracurricularRecommendations.map((rec: string, index: number) => `
-                                    <div style="background: white; padding: 12px; border-radius: 8px; border-left: 4px solid #A855F7; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                                        <div style="font-weight: 600; color: #7C3AED;">${rec}</div>
-                                    </div>
-                                `).join('')}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="footer" style="background: linear-gradient(135deg, #003B8C, #5BE49B); color: white; padding: 30px; text-align: center; margin-top: 40px;">
-                <div style="display: flex; align-items: center; justify-content: center; margin-bottom: 20px;">
-                    <div style="width: 50px; height: 50px; background: rgba(255,255,255,0.2); border-radius: 8px; display: flex; align-items: center; justify-content: center; margin-right: 15px;">
-                        <span style="color: white; font-weight: bold; font-size: 20px;">DV</span>
-                    </div>
-                    <div>
-                        <h3 style="margin: 0; color: white; font-size: 24px; font-weight: 700;">D-Vivid Consultant</h3>
-                        <p style="margin: 5px 0 0 0; color: rgba(255,255,255,0.9); font-size: 16px;">Strategic Counselling Circle</p>
-                    </div>
-                </div>
-                <div style="background: rgba(255,255,255,0.1); border-radius: 8px; padding: 20px; margin: 20px 0;">
-                    <p style="margin: 0 0 10px 0; font-size: 16px; font-weight: 500;">📧 info@dvividconsultant.com | 📞 +91 98765 43210 | 📍 Surat, Gujarat, India</p>
-                    <p style="margin: 0; font-size: 14px; color: rgba(255,255,255,0.8);">Your Gateway to Global Education</p>
-                </div>
-                <p style="margin: 20px 0 0 0; font-size: 14px; color: rgba(255,255,255,0.8);">This comprehensive report was generated on ${currentDate}</p>
-                <p style="margin: 5px 0 0 0; font-size: 12px; color: rgba(255,255,255,0.7);">© 2024 D-Vivid Consultant. All rights reserved. | Powered by AI Technology</p>
+                <div>Report Generated: ${currentDate}</div>
             </div>
         </div>
     </body>
     </html>
-  `
+  `;
 }

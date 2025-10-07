@@ -3,6 +3,8 @@ import OpenAI from 'openai'
 
 interface StudentData {
   userName: string
+  userEmail?: string
+  userPhone?: string
   overallScore: number
   topicScoresArray: Array<{
     name: string
@@ -62,75 +64,113 @@ export async function POST(request: NextRequest) {
     }
     
     // Check if API key is available
-    const apiKey = process.env.OPENROUTER_API_KEY;
+    const apiKey = process.env.PERPLEXITY_API_KEY;
     if (!apiKey) {
-      console.error('❌ OPENROUTER_API_KEY not found in environment variables');
-      throw new Error('OPENROUTER_API_KEY not configured');
+      console.error('❌ PERPLEXITY_API_KEY not found in environment variables');
+      throw new Error('PERPLEXITY_API_KEY not configured');
     }
-    console.log('✅ OPENROUTER_API_KEY found:', apiKey.substring(0, 10) + '...');
+    console.log('✅ PERPLEXITY_API_KEY found:', apiKey.substring(0, 10) + '...');
     console.log('🔑 Full API key length:', apiKey.length);
     
     // Prepare the prompts
-      const systemPrompt = `You are a Study Abroad Counselor specializing in international education readiness assessment. Analyze student scores and generate a comprehensive JSON report.
+      const systemPrompt = `You are an expert psychometric evaluator for Indian study-abroad aspirants. 
+You analyze aptitude and personality test responses and map them to the 
+Comprehensive Study Abroad Assessment Framework (Academic Readiness, Financial Planning, 
+Career Alignment, Personal & Cultural Readiness, Practical Readiness, Support System).
 
-STUDY ABROAD READINESS BANDS:
-- 90-100: Excellent - Highly prepared for competitive international programs
-- 80-89: Very Good - Well-prepared with minor areas for improvement
-- 70-79: Good - Moderately prepared, some areas need strengthening
-- 60-69: Satisfactory - Basic readiness, significant preparation needed
-- <60: Needs Improvement - Requires substantial preparation before study abroad
+You must:
+• Interpret quiz/test responses from numerical, verbal, mechanical, and concentration tests as indicators of cognitive skills.  
+• Interpret personality items (Big Five model) as indicators of emotional, cultural, and social readiness.
+• Calculate sub-scores for each dimension (0–100 scale) and provide readiness levels using the scoring guide:  
+  - 90–100: Excellent  
+  - 80–89: Very Good  
+  - 70–79: Good  
+  - 60–69: Satisfactory  
+  - <60: Needs Improvement  
 
-ASSESSMENT AREAS:
-- Academic Readiness: Language skills, learning style, research abilities, motivation, stress management
-- Cultural Adaptability: Social skills, cultural openness, language adaptability, openness to experience, emotional independence
-- Career Clarity: Career goals, work environment preferences, international career importance, professional motivation
-- Study Abroad Readiness: Financial planning, motivation, home connections, challenge awareness, contribution mindset
+• Then synthesize a narrative summary of strengths, gaps, and recommendations for improvement.
+• Align all results with the 6-factor framework weights:
+  - Financial Planning 25%
+  - Academic Readiness 20%
+  - Career & Goal Alignment 20%
+  - Personal & Cultural Readiness 15%
+  - Practical Readiness 10%
+  - Support System 10%
 
-Generate JSON with these exact fields:
-- careerInterests: [{"name":"Research & Academia","score":X}, {"name":"Technology & Innovation","score":X}, {"name":"Business & Management","score":X}, {"name":"Healthcare & Medicine","score":X}]
-- aptitudeScores: [{"name":"Academic Readiness","score":X}, {"name":"Cultural Adaptability","score":X}, {"name":"Career Clarity","score":X}, {"name":"Study Abroad Readiness","score":X}]
-- skills: [{"name":"Cultural Adaptability","score":X}, {"name":"Language Learning","score":X}, {"name":"Financial Planning","score":X}, {"name":"Goal Setting","score":X}]
-- analysis: {"readinessBand":"X", "overallAssessment":"text", "strengths":["text"], "weaknesses":["text"], "specificRecommendations":["text"]}
+Output Format (JSON + Summary):
+{
+  "Student Name": "...",
+  "Scores": {
+     "Financial Planning": "...",
+     "Academic Readiness": "...",
+     "Career Alignment": "...",
+     "Personal & Cultural": "...",
+     "Practical Readiness": "...",
+     "Support System": "..."
+  },
+  "Overall Readiness Index": "...",
+  "Readiness Level": "...",
+  "Strengths": "...",
+  "Gaps": "...",
+  "Recommendations": "...",
+  "Country Fit (Top 3)": [...]
+}
 
-Focus on study abroad readiness, cultural adaptability, and international education preparation. ONLY output JSON.`
+Be objective, research-based, and India-context aware. ONLY output JSON.`
 
-      const userPrompt = `Student: ${studentData.userName}
-Overall Study Abroad Readiness Score: ${studentData.overallScore}/100
+      const userPrompt = `Evaluate the following student's quiz performance and psychometric profile.
 
-Assessment Results:
-${studentData.topicScoresArray.map(topic => `- ${topic.name}: ${topic.correct}/100`).join('\n')}
+Student Details:
+Name: ${studentData.userName}
+Email: ${studentData.userEmail || 'Not provided'}
+Contact: ${studentData.userPhone || 'Not provided'}
 
-Please analyze this student's readiness for international education and provide:
-1. Readiness band assessment
-2. Strengths and areas for improvement
-3. Specific recommendations for study abroad preparation
-4. Career interest alignment
-5. Skills development priorities
+Test Results Summary:
+${studentData.topicScoresArray.map(topic => {
+  const score = Math.round((topic.correct/topic.total)*25);
+  return `${topic.name}: ${score} / 25`;
+}).join('\n')}
 
-Generate comprehensive JSON report focusing on study abroad readiness.`
+Overall Performance: ${studentData.overallScore}/100
 
-    // Try Gemini API with fallback to mock data
+IMPORTANT EVALUATION GUIDELINES:
+- Interpret these scores as indicators of readiness across the 6-factor framework
+- Map quiz performance to the comprehensive study abroad assessment framework
+- Consider that quiz responses reflect cognitive abilities, personality traits, and preparedness
+- Use the scoring guide: 90-100 (Excellent), 80-89 (Very Good), 70-79 (Good), 60-69 (Satisfactory), <60 (Needs Improvement)
+- Provide realistic, research-based analysis suitable for Indian study-abroad aspirants
+
+Please:
+1. Generate the **CRI (Comprehensive Readiness Index)** based on the 6-factor framework mapping
+2. Provide sub-scores for each of the 6 framework areas (Financial Planning, Academic Readiness, Career Alignment, Personal & Cultural, Practical Readiness, Support System)
+3. Include qualitative strengths, development areas, and clear next steps
+4. Suggest top 3 study destinations using the Country-Fit Matrix logic from the framework
+
+Use the 6-factor framework weights:
+- Financial Planning 25%
+- Academic Readiness 20%
+- Career & Goal Alignment 20%
+- Personal & Cultural Readiness 15%
+- Practical Readiness 10%
+- Support System 10%`
+
+    // Try Perplexity API with fallback to mock data
     let generatedText = '';
     let modelUsed = 'fallback';
     
     try {
-      console.log('🌐 Attempting OpenRouter API call...');
+      console.log('🌐 Attempting Perplexity API call...');
       const openai = new OpenAI({
         apiKey: apiKey,
-        baseURL: "https://openrouter.ai/api/v1",
-        defaultHeaders: {
-          "HTTP-Referer": "https://dvividconsultant.com", // Optional, for analytics
-          "X-Title": "D-Vivid Consultant Study Abroad Assessment", // Optional, for analytics
-        },
-        timeout: 10000, // 10 second timeout
+        baseURL: "https://api.perplexity.ai",
+        timeout: 60000, // 60 second timeout
+        maxRetries: 2,
       });
 
-      // Try multiple fast models in sequence with timeout
+      // Use Perplexity Sonar models (sonar-pro as primary)
       const models = [
-        "meta-llama/llama-3.2-3b-instruct:free",
-        "google/gemma-2-2b-it:free",
-        "meta-llama/llama-3.1-8b-instruct:free",
-        "microsoft/phi-3-mini-128k-instruct:free"
+        "sonar-pro",
+        "sonar"
       ];
       
       let completion: any = null;
@@ -152,11 +192,11 @@ Generate comprehensive JSON report focusing on study abroad readiness.`
               }
             ],
             temperature: 0.3,
-            max_tokens: 1024,
+            max_tokens: 2048
           });
           
           const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('Model timeout')), 5000)
+            setTimeout(() => reject(new Error('Model timeout')), 45000)
           );
           
           completion = await Promise.race([modelPromise, timeoutPromise]);
@@ -174,70 +214,58 @@ Generate comprehensive JSON report focusing on study abroad readiness.`
       }
 
       generatedText = completion.choices[0]?.message?.content || '';
-      modelUsed = 'phi-3-mini-128k-instruct:free';
-      console.log('✅ OpenRouter API success!');
+      modelUsed = 'perplexity-llama-3.1-sonar';
+      console.log('✅ Perplexity API success!');
       console.log('📝 Generated text length:', generatedText.length);
       console.log('📝 Generated text preview:', generatedText.substring(0, 200) + '...');
       
     } catch (error: any) {
-      console.log('❌ OpenRouter API failed, using fallback data');
+      console.log('❌ Perplexity API failed, using fallback data');
       console.log('Error:', error.message);
       
-            // Generate intelligent fallback data based on student performance
+            // Generate intelligent fallback data based on student performance using 6-factor framework
             const readinessBand = studentData.overallScore >= 90 ? 'Excellent' : 
                                  studentData.overallScore >= 80 ? 'Very Good' :
                                  studentData.overallScore >= 70 ? 'Good' :
                                  studentData.overallScore >= 60 ? 'Satisfactory' : 'Needs Improvement';
             
-            // Generate scores based on actual performance
-            const baseScore = Math.max(1, Math.floor(studentData.overallScore / 10));
-            const variation = 2;
+            // Generate realistic scores for each framework area based on quiz performance
+            const academicScore = Math.max(0, Math.min(100, studentData.overallScore + Math.floor(Math.random() * 20 - 10)));
+            const financialScore = Math.max(0, Math.min(100, studentData.overallScore + Math.floor(Math.random() * 30 - 15)));
+            const careerScore = Math.max(0, Math.min(100, studentData.overallScore + Math.floor(Math.random() * 25 - 12)));
+            const culturalScore = Math.max(0, Math.min(100, studentData.overallScore + Math.floor(Math.random() * 20 - 10)));
+            const practicalScore = Math.max(0, Math.min(100, studentData.overallScore + Math.floor(Math.random() * 15 - 8)));
+            const supportScore = Math.max(0, Math.min(100, studentData.overallScore + Math.floor(Math.random() * 10 - 5)));
             
+            // Calculate weighted overall score using 6-factor framework
+            const weightedScore = Math.round(
+              (financialScore * 0.25) + 
+              (academicScore * 0.20) + 
+              (careerScore * 0.20) + 
+              (culturalScore * 0.15) + 
+              (practicalScore * 0.10) + 
+              (supportScore * 0.10)
+            );
+
             generatedText = JSON.stringify({
-              studentName: studentData.userName,
-              studentEmail: 'student@example.com',
-              studentClass: '12',
-              studentSchool: 'Sample School',
-              score: studentData.overallScore,
-              maxScore: 100,
-              totalTime: 45,
-              topics: studentData.topicScoresArray,
-              careerInterests: [
-                { name: 'Research & Academia', score: Math.max(1, Math.min(10, baseScore + Math.floor(Math.random() * variation))) },
-                { name: 'Technology & Innovation', score: Math.max(1, Math.min(10, baseScore + Math.floor(Math.random() * variation))) },
-                { name: 'Business & Management', score: Math.max(1, Math.min(10, baseScore + Math.floor(Math.random() * variation))) },
-                { name: 'Healthcare & Medicine', score: Math.max(1, Math.min(10, baseScore + Math.floor(Math.random() * variation))) }
-              ],
-              aptitudeScores: [
-                { name: 'Academic Readiness', score: Math.max(1, Math.min(10, baseScore + Math.floor(Math.random() * variation))) },
-                { name: 'Cultural Adaptability', score: Math.max(1, Math.min(10, baseScore + Math.floor(Math.random() * variation))) },
-                { name: 'Career Clarity', score: Math.max(1, Math.min(10, baseScore + Math.floor(Math.random() * variation))) },
-                { name: 'Study Abroad Readiness', score: Math.max(1, Math.min(10, baseScore + Math.floor(Math.random() * variation))) }
-              ],
-              skills: [
-                { name: 'Cultural Adaptability', score: Math.max(20, Math.min(100, studentData.overallScore + Math.floor(Math.random() * 20))) },
-                { name: 'Language Learning', score: Math.max(20, Math.min(100, studentData.overallScore + Math.floor(Math.random() * 20))) },
-                { name: 'Financial Planning', score: Math.max(20, Math.min(100, studentData.overallScore + Math.floor(Math.random() * 20))) },
-                { name: 'Goal Setting', score: Math.max(20, Math.min(100, studentData.overallScore + Math.floor(Math.random() * 20))) }
-              ],
-              academicRecommendations: ['Advanced English Literature', 'Research Methodology', 'Cross-Cultural Studies'],
-              examRecommendations: ['IELTS', 'TOEFL', 'SAT', 'GRE'],
-              upskillingRecommendations: ['Cross-Cultural Communication', 'Language Training', 'Financial Planning'],
-              extracurricularRecommendations: ['International Student Exchange', 'Cultural Clubs', 'Study Groups'],
-              analysis: {
-                readinessBand: readinessBand,
-                overallAssessment: `Based on your study abroad readiness score of ${studentData.overallScore}, you demonstrate ${readinessBand.toLowerCase()} preparedness for international education.`,
-                strengths: studentData.overallScore >= 70 ? 
-                  ['Strong academic foundation', 'Good cultural adaptability', 'Clear career goals'] :
-                  ['Potential for growth', 'Willingness to learn', 'Basic academic skills'],
-                weaknesses: studentData.overallScore < 70 ?
-                  ['Language skills need improvement', 'Cultural adaptability requires development', 'Financial planning needs attention'] :
-                  ['Communication skills', 'Leadership development', 'Advanced preparation'],
-                specificRecommendations: studentData.overallScore < 70 ?
-                  ['Focus on language skills development', 'Build cultural awareness', 'Improve financial planning', 'Strengthen academic foundation'] :
-                  ['Enhance communication skills', 'Develop leadership qualities', 'Prepare for standardized tests', 'Build international experience']
-              }
-            });
+              "Student Name": studentData.userName,
+              "Scores": {
+                "Financial Planning": financialScore,
+                "Academic Readiness": academicScore,
+                "Career Alignment": careerScore,
+                "Personal & Cultural": culturalScore,
+                "Practical Readiness": practicalScore,
+                "Support System": supportScore
+              },
+              "Overall Readiness Index": weightedScore,
+              "Readiness Level": readinessBand,
+              "Strengths": `Based on your assessment, you demonstrate ${readinessBand.toLowerCase()} readiness in key areas. Your performance indicates ${academicScore >= 70 ? 'strong academic foundation' : 'areas for academic improvement'}, ${supportScore >= 70 ? 'good support systems' : 'need for stronger support networks'}, and ${careerScore >= 70 ? 'clear career direction' : 'need for career clarity'}.`,
+              "Gaps": `Areas requiring attention include ${financialScore < 60 ? 'financial planning and budgeting for international education' : 'maintaining financial readiness'}, ${culturalScore < 60 ? 'cultural adaptability and cross-cultural communication skills' : 'enhancing cultural awareness'}, and ${practicalScore < 60 ? 'practical preparation for living abroad' : 'strengthening practical readiness'}.`,
+              "Recommendations": `1. ${financialScore < 70 ? 'Develop a comprehensive financial plan including budgeting, scholarship research, and funding strategies.' : 'Maintain your financial planning approach.'} 2. ${academicScore < 70 ? 'Focus on academic preparation including language skills and subject mastery.' : 'Continue your academic excellence.'} 3. ${careerScore < 70 ? 'Engage in career counseling to clarify long-term goals and align study plans.' : 'Leverage your clear career direction.'} 4. ${culturalScore < 70 ? 'Participate in cultural exchange programs and intercultural training.' : 'Build on your cultural adaptability.'} 5. ${practicalScore < 70 ? 'Research visa processes, accommodation, and daily living requirements.' : 'Enhance your practical readiness.'}`,
+              "Country Fit (Top 3)": weightedScore >= 80 ? ["United States", "United Kingdom", "Canada"] : 
+                                   weightedScore >= 60 ? ["Singapore", "Australia", "Germany"] : 
+                                   ["India (domestic options)", "Singapore (conditional)", "UAE (with support)"]
+            }, null, 2);
     }
 
     // Parse the JSON response from Gemini

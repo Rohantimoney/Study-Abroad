@@ -59,7 +59,7 @@ async function testCompleteFlow() {
   console.log('📡 Testing API route with complete data...');
   
   // Use curl to test the API
-  const curlCommand = `curl -X POST http://localhost:3000/api/generate-pdf -H "Content-Type: application/json" -d @complete-test-data.json -o complete-test-output.pdf -w "HTTP Status: %{http_code}\\nResponse Time: %{time_total}s\\n"`;
+  const curlCommand = `curl -X POST http://localhost:3001/api/generate-pdf -H "Content-Type: application/json" -d @complete-test-data.json -o complete-test-output.pdf -w "HTTP Status: %{http_code}\\nResponse Time: %{time_total}s\\n"`;
   
   exec(curlCommand, (error, stdout, stderr) => {
     if (error) {
@@ -90,3 +90,6 @@ async function testCompleteFlow() {
 }
 
 testCompleteFlow();
+
+
+

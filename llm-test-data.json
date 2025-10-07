@@ -1,0 +1,16 @@
+{
+  "userName": "Test User",
+  "overallScore": 85,
+  "topicScoresArray": [
+    {
+      "name": "Academic Readiness",
+      "correct": 3,
+      "total": 4
+    },
+    {
+      "name": "Cultural Adaptability",
+      "correct": 2,
+      "total": 3
+    }
+  ]
+}
