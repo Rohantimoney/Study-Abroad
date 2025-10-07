@@ -7,7 +7,7 @@ import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Progress } from "../ui/progress";
-import { CheckCircle } from "lucide-react";
+import { CheckCircle, Download, Loader2 } from "lucide-react";
 
 interface Question {
   id: string;
@@ -379,6 +379,8 @@ export default function ConciseSurvey() {
 
     return {
       userName: userInfo.email.split('@')[0],
+      userEmail: userInfo.email,
+      userPhone: userInfo.mobile,
       overallScore,
       topicScoresArray
     };
@@ -468,6 +470,33 @@ export default function ConciseSurvey() {
     }
   };
 
+  if (step === 'processing') {
+    return (
+      <div className="max-w-2xl mx-auto mt-8">
+        <Card>
+          <CardContent className="pt-6">
+            <div className="text-center space-y-4">
+              <Loader2 className="mx-auto h-16 w-16 text-purple-600 animate-spin" />
+              <h2 className="text-3xl font-bold bg-gradient-to-r from-purple-600 to-violet-600 bg-clip-text text-transparent">
+                Analyzing Your Responses
+              </h2>
+              <p className="text-lg text-muted-foreground">
+                Our AI is evaluating your assessment and preparing your personalized study abroad readiness report...
+              </p>
+              <div className="bg-purple-50 dark:bg-purple-950/20 p-4 rounded-lg">
+                <p className="text-sm">
+                  <strong>Assessment Type:</strong> Focused Study Abroad Readiness Assessment<br />
+                  <strong>Questions Completed:</strong> {conciseQuestions.length}<br />
+                  <strong>Processing:</strong> AI Analysis in Progress
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   if (step === 'info') {
     return (
       <div className="max-w-md mx-auto mt-8">
@@ -518,6 +547,64 @@ export default function ConciseSurvey() {
   }
 
   if (step === 'completed') {
+    const handleDownloadPDF = async () => {
+      if (isDownloadingPDF) return;
+      
+      setIsDownloadingPDF(true);
+      try {
+        const surveyData = JSON.parse(localStorage.getItem('conciseSurvey') || '{}');
+        if (surveyData.analysisResults) {
+          console.log('🔄 Starting PDF generation for Concise Survey...');
+          
+          // Wait 25 seconds for PDF generation (no premature checks)
+          console.log('⏳ Waiting 25 seconds for PDF generation to complete...');
+          await new Promise(resolve => setTimeout(resolve, 25000));
+          
+          // Now make the request after waiting
+          const response = await fetch('/api/generate-pdf', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(surveyData.analysisResults)
+          });
+
+          if (response.ok) {
+            console.log('✅ PDF generated successfully for Concise Survey');
+            const blob = await response.blob();
+            console.log('📄 Blob created, size:', blob.size, 'type:', blob.type);
+            
+            // Direct download without any size checks
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `concise-study-abroad-report-${userInfo.email.split('@')[0]}.pdf`;
+            a.style.display = 'none';
+            document.body.appendChild(a);
+            a.click();
+            
+            setTimeout(() => {
+              window.URL.revokeObjectURL(url);
+              document.body.removeChild(a);
+            }, 1000);
+            
+            console.log('✅ PDF download initiated for Concise Survey');
+          } else {
+            console.error('❌ PDF generation failed:', response.status);
+            alert('PDF generation failed. Please try again.');
+          }
+        } else {
+          console.error('❌ No analysis results found for Concise Survey');
+          alert('No analysis results found. Please complete the assessment again.');
+        }
+      } catch (error: any) {
+        console.error('❌ Error downloading PDF for Concise Survey:', error);
+        alert('Error downloading PDF. Please try again.');
+      } finally {
+        setIsDownloadingPDF(false);
+      }
+    };
+
     return (
       <div className="max-w-2xl mx-auto mt-8">
         <Card>
@@ -538,12 +625,32 @@ export default function ConciseSurvey() {
                   <strong>Assessment Type:</strong> Concise Track (25 Questions)
                 </p>
               </div>
-              <Button 
-                onClick={() => window.location.reload()} 
-                className="bg-gradient-to-r from-purple-600 to-violet-600 hover:from-purple-700 hover:to-violet-700"
-              >
-                Take Another Assessment
-              </Button>
+              <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                <Button 
+                  onClick={handleDownloadPDF}
+                  disabled={isDownloadingPDF}
+                  className={`bg-gradient-to-r from-purple-600 to-violet-600 hover:from-purple-700 hover:to-violet-700 ${isDownloadingPDF ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  {isDownloadingPDF ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Generating PDF...
+                    </>
+                  ) : (
+                    <>
+                      <Download className="mr-2 h-4 w-4" />
+                      Download Detailed Report
+                    </>
+                  )}
+                </Button>
+                <Button 
+                  onClick={() => window.location.reload()} 
+                  variant="outline"
+                  className="border-purple-200 text-purple-700 hover:bg-purple-50"
+                >
+                  Take Another Assessment
+                </Button>
+              </div>
             </div>
           </CardContent>
         </Card>

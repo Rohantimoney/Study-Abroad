@@ -100,6 +100,8 @@ You must:
 Output Format (JSON + Summary):
 {
   "Student Name": "...",
+  "Student Email": "...",
+  "Student Phone": "...",
   "Scores": {
      "Financial Planning": "...",
      "Academic Readiness": "...",

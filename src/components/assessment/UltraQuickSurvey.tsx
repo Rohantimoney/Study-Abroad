@@ -236,6 +236,8 @@ export default function UltraQuickSurvey() {
 
     return {
       userName: userInfo.email.split('@')[0],
+      userEmail: userInfo.email,
+      userPhone: userInfo.mobile,
       overallScore,
       topicScoresArray
     };

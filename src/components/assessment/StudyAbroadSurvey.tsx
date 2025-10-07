@@ -736,6 +736,8 @@ export default function StudyAbroadSurvey() {
             },
             body: JSON.stringify({
               userName: userInfo.email.split('@')[0], // Use email prefix as name
+              userEmail: userInfo.email,
+              userPhone: userInfo.mobile,
               overallScore: scores.overallScore,
               topicScoresArray: scores.topicScores
             })
